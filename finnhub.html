@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Real-time Stock Signal Dashboard</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b0f14;--card:#0f1720;--muted:#93a3b6;--accent:#d8e0e2;--green:#26d07b;--red:#ff6b6b;--glass: rgba(255,255,255,0.03);
+      --glass-2: rgba(255,255,255,0.02);
+      font-family: Inter, ui-s ans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#061118 0%, #071421 60%);color:#d8e6ef}
+    .app{max-width:1200px;margin:32px auto;padding:20px;}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{width:44px;height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700}
+    h1{font-size:18px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    input[type=text]{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:10px 12px;border-radius:8px;color:inherit;width:220px}
+    select{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:10px 12px;border-radius:8px;color:inherit}
+    button{background:linear-gradient(90deg,var(--accent),#c4bbbb);border:0;padding:10px 14px;border-radius:8px;color:#041018;font-weight:700;cursor:pointer}
+
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:18px;margin-top:18px}
+    .card{background:linear-gradient(180deg,var(--card), #071421);border-radius:12px;padding:14px;box-shadow:0 6px 24px rgba(2,6,10,0.6);border:1px solid rgba(255,255,255,0.03)}
+    #chartWrapper{height:420px;padding:8px;background:linear-gradient(180deg,var(--glass),transparent);border-radius:8px;display:flex;align-items:center}
+    canvas{width:100% !important;height:100% !important}
+  .gradient-text {
+    font-size: 2rem;
+    font-weight: bold;
+    background: linear-gradient(to right, #ffffff, #929499, #797986);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+    .rightCol{display:flex;flex-direction:column;gap:12px}
+    .signalBadge{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px}
+    .signalText{font-size:20px;font-weight:800}
+    .signalDesc{color:var(--muted);font-size:13px}
+    .metrics{display:flex;gap:8px;flex-wrap:wrap}
+    .metric{background:var(--glass-2);padding:8px;border-radius:8px;min-width:100px}
+    .smallChart{height:110px;background:transparent}
+    .explain{font-size:13px;color:var(--muted);line-height:1.3}
+    footer{margin-top:18px;color:var(--muted);font-size:13px;text-align:center}
+    .buy{background:linear-gradient(90deg, rgba(38,208,123,0.12), rgba(0,213,255,0.03));border-left:4px solid var(--green)}
+    .sell{background:linear-gradient(90deg, rgba(255,107,107,0.07), rgba(107,91,255,0.02));border-left:4px solid var(--red)}
+    .hold{background:linear-gradient(90deg, rgba(255,255,255,0.02), transparent);border-left:4px solid rgba(255,255,255,0.03)}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:10px;align-items:center}
+    .conf{font-size:14px;font-weight:700}
+    @media(max-width:980px){.grid{grid-template-columns:1fr;}.rightCol{order:2}}
+    /* small spinner inside controls */
+    .spinner { width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.15);border-top-color:rgba(255,255,255,0.65);animation:spin .8s linear infinite;display:inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div class="logo"><img src="logo.png" width="50px" alt="logo"> </div>
+        <span class="gradient-text">BeneficentTrader</span>
+      </div>
+
+      <div class="controls">
+        <input id="symbol" type="text" placeholder="Ticker e.g. GOOGL or BINANCE:BTCUSDT" value="" />
+        <select id="interval">
+          <option value="1">1m</option>
+          <option value="5" selected>5m</option>
+          <option value="15">15m</option>
+          <option value="60">1h</option>
+          <option value="D">1D</option>
+        </select>
+        <select id="chartRange">
+          <option value="100">100 bars</option>
+          <option value="200" selected>200 bars</option>
+          <option value="500">500 bars</option>
+        </select>
+        <button id="fetchBtn">Update</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div>
+        <div class="card" id="chartCard">
+          <div id="chartWrapper">
+            <canvas id="chartCanvas"></canvas>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:12px">
+          <div class="card" style="flex:1">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="muted">RSI (14)</div>
+              <div id="rsiVal" class="muted">-</div>
+            </div>
+            <div class="smallChart"><canvas id="rsiCanvas"></canvas></div>
+          </div>
+
+          <div class="card" style="width:260px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="muted">MACD</div>
+              <div id="macdVal" class="muted">-</div>
+            </div>
+            <div class="smallChart"><canvas id="macdCanvas"></canvas></div>
+          </div>
+        </div>
+
+      </div>
+
+<aside class="rightCol">
+
+  <div id="signalCard" class="card signalBadge hold">
+    <div style="flex:1">
+      <div id="signalText" class="signalText">HOLD</div>
+      <div id="signalSub" class="signalDesc">No strong consensus yet</div>
+    </div>
+    <div style="text-align:right">
+      <div class="conf" id="confidence">0%</div>
+      <div class="muted">Confidence</div>
+    </div>
+  </div>
+
+  <div id="preSignalCard" class="card signalBadge hold">
+    <div style="flex:1">
+      <div id="preSignalText" class="signalText">WAIT</div>
+      <div id="preSignalSub" class="signalDesc">No early signal</div>
+    </div>
+    <div style="text-align:right">
+      <div class="conf" id="preConfidence">0%</div>
+      <div class="muted">Confidence</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="muted">Indicators</div>
+      <div class="muted">Value</div>
+    </div>
+    <div class="metrics" id="metricList">
+      <!-- dynamic metrics -->
+    </div>
+  </div>
+
+  <div class="card explain">
+    <strong>Decision logic</strong>
+    <p id="decisionExplain">Score-based: each indicator gives +1/0/-1. Sum &gt;=3 =&gt; Strong BUY. Debounce: 2 bars.</p>
+    <p style="margin-top:10px;" class="muted">Note: This demo uses free data APIs (may be delayed). Do not use for live execution.</p>
+  </div>
+
+</aside>
+
+    </div>
+
+    <footer class="muted">PLEASE NOTE: For educational/test purposes only, use at your own risk. We will not be reponsible for any gain or loss.</footer>
+  </div>
+
+<script>
+/* ---------------------------
+   CONFIG - Paste your Finnhub API key here
+   --------------------------- */
+const CONFIG = {
+  API_PROVIDER: 'Finnhub',
+  API_KEY: 'd3i16bhr01qr304fuclgd3i16bhr01qr304fucm0',
+  DEBOUNCE_BARS: 2,
+  EMA_PERIOD: 13,
+  RSI_PERIOD: 14,
+  MACD_FAST: 12, MACD_SLOW: 26, MACD_SIGNAL: 9
+};
+
+function N(v){ return typeof v === 'number' ? v : parseFloat(v) || 0; }
+
+/* Indicator calculations (kept from your code) */
+function calculateEMA(values, period){
+  const k = 2/(period+1);
+  const ema = new Array(values.length).fill(null);
+  if(values.length < period) return ema;
+  const seed = values.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  ema[period-1] = seed;
+  for(let i=period;i<values.length;i++){
+    ema[i] = values[i]*k + ema[i-1]*(1-k);
+  }
+  return ema;
+}
+
+function calculateRSI(values, period=14){
+  const rsi = new Array(values.length).fill(null);
+  if(values.length <= period) return rsi;
+  let gains=0, losses=0;
+  for(let i=1;i<=period;i++){
+    const diff = values[i]-values[i-1];
+    if(diff>=0) gains += diff; else losses += Math.abs(diff);
+  }
+  let avgGain = gains/period, avgLoss = losses/period;
+  rsi[period] = avgLoss===0 ? 100 : 100 - (100/(1 + (avgGain/avgLoss)));
+  for(let i=period+1;i<values.length;i++){
+    const diff = values[i]-values[i-1];
+    const gain = diff>0?diff:0;
+    const loss = diff<0?Math.abs(diff):0;
+    avgGain = ((avgGain*(period-1)) + gain)/period;
+    avgLoss = ((avgLoss*(period-1)) + loss)/period;
+    const rs = avgLoss===0 ? 100 : avgGain/avgLoss;
+    rsi[i] = 100 - (100/(1+rs));
+  }
+  return rsi;
+}
+
+function calculateMACD(values, fast=12, slow=26, signal=9){
+  const emaFast = calculateEMA(values, fast);
+  const emaSlow = calculateEMA(values, slow);
+  const macd = new Array(values.length).fill(null);
+  for(let i=0;i<values.length;i++){
+    if(emaFast[i] == null || emaSlow[i] == null) { macd[i]=null; continue; }
+    macd[i] = emaFast[i] - emaSlow[i];
+  }
+  const signalLine = calculateEMA(macd.map(v=>v===null?0:v), signal);
+  const histogram = new Array(values.length).fill(null);
+  for(let i=0;i<values.length;i++){
+    if(macd[i] === null || signalLine[i] === null) histogram[i]=null;
+    else histogram[i] = macd[i] - signalLine[i];
+  }
+  return { macd, signalLine, histogram };
+}
+
+function calculateVWAP(candles){
+  let cumPV=0, cumVol=0; const out=[];
+  for(let i=0;i<candles.length;i++){
+    const tp = (N(candles[i].high) + N(candles[i].low) + N(candles[i].close))/3;
+    cumPV += tp * N(candles[i].volume);
+    cumVol += N(candles[i].volume);
+    out.push(cumVol===0?tp:(cumPV/cumVol));
+  }
+  return out;
+}
+
+/* Decision / signal logic (kept) */
+function indicatorState({price,vwap,ema,rsi,macdHist}){
+  const states = {};
+  states.vwap = price > vwap ? 1 : (Math.abs(price - vwap) / (vwap || price) < 0.001 ? 0 : -1);
+  states.ema = price > ema ? 1 : (Math.abs(price - ema) / (ema || price) < 0.001 ? 0 : -1);
+  if(rsi == null) states.rsi = 0; else if(rsi < 30) states.rsi = 1; else if(rsi > 70) states.rsi = -1; else states.rsi = (rsi>=45 && rsi<=60)?1:0;
+  if(macdHist == null) states.macd = 0; else states.macd = macdHist>0?1:(macdHist<0?-1:0);
+  return states;
+}
+
+function scoreToSignal(score){
+  if(score >= 3) return {tag:'BUY', cls:'buy', desc:'Strong BUY'};
+  if(score === 2) return {tag:'BUY', cls:'buy', desc:'Weak BUY'};
+  if(score === 1 || score === 0) return {tag:'HOLD', cls:'hold', desc:'Neutral / Wait'};
+  if(score === -1 || score === -2) return {tag:'SELL', cls:'sell', desc:'Weak SELL'};
+  return {tag:'SELL', cls:'sell', desc:'Strong SELL'};
+}
+
+/* Pre-signal (kept) */
+function calculatePreSignal({price, vwap, ema, rsi, macdHist}) {
+  let score = 0;
+  if(price < vwap && (vwap - price)/vwap < 0.005) score += 1;
+  else if(price > vwap && (price - vwap)/vwap < 0.005) score -= 1;
+  if(Math.abs(price - ema)/ema < 0.005) score += (price < ema ? 1 : -1);
+  if(rsi >= 35 && rsi <= 45) score += 1;
+  else if(rsi >= 55 && rsi <= 65) score -= 1;
+  if(macdHist < 0 && Math.abs(macdHist) < 0.1) score += 1;
+  else if(macdHist > 0 && macdHist < 0.1) score -= 1;
+  if(score >= 2) return {tag:'PRE-BUY', cls:'buy', desc:'Early bullish signal'};
+  if(score <= -2) return {tag:'PRE-SELL', cls:'sell', desc:'Early bearish signal'};
+  return {tag:'WAIT', cls:'hold', desc:'No early signal'};
+}
+
+function updatePreSignalCard(preSignal, confidence) {
+  const preText = document.getElementById('preSignalText');
+  const preSub = document.getElementById('preSignalSub');
+  const preConf = document.getElementById('preConfidence');
+  preText.innerText = preSignal.tag;
+  preSub.innerText = `${preSignal.desc}`;
+  preConf.innerText = `${confidence}%`;
+  document.getElementById('preSignalCard').className = 'card signalBadge ' + preSignal.cls;
+}
+
+/* DOM refs */
+const fetchBtn=document.getElementById('fetchBtn');
+const symbolInput=document.getElementById('symbol');
+const intervalSelect=document.getElementById('interval');
+const rangeSelect=document.getElementById('chartRange');
+const signalText=document.getElementById('signalText');
+const signalCard=document.getElementById('signalCard');
+const signalSub=document.getElementById('signalSub');
+const confidenceEl=document.getElementById('confidence');
+const metricList=document.getElementById('metricList');
+const rsiVal=document.getElementById('rsiVal');
+const macdVal=document.getElementById('macdVal');
+
+let lastSignals=[];
+
+/* Chart setup */
+const mainCtx=document.getElementById('chartCanvas').getContext('2d');
+const rsiCtx=document.getElementById('rsiCanvas').getContext('2d');
+const macdCtx=document.getElementById('macdCanvas').getContext('2d');
+
+const mainChart=new Chart(mainCtx,{type:'line',data:{datasets:[
+  {label:'Price',data:[],borderColor:'#89e0ff',borderWidth:2,pointRadius:0,tension:0.2},
+  {label:'VWAP',data:[],borderColor:'#6b5bff',borderWidth:1.5,borderDash:[6,4],pointRadius:0,tension:0},
+  {label:`EMA(${CONFIG.EMA_PERIOD})`,data:[],borderColor:'#00d07f',borderWidth:1.5,pointRadius:0,tension:0}
+]},options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+scales:{x:{type:'time',time:{tooltipFormat:"yyyy-MM-dd HH:mm"},grid:{color:'rgba(255,255,255,0.03)'},ticks:{color:'#9fb0c7'}},
+y:{grid:{color:'rgba(255,255,255,0.03)'},ticks:{color:'#9fb0c7'}}}}});
+
+const rsiChart=new Chart(rsiCtx,{type:'line',data:{datasets:[{label:'RSI',data:[],borderColor:'#ffcc66',borderWidth:1.6,pointRadius:0,tension:0}]},
+options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{type:'time',display:false},y:{min:0,max:100,ticks:{color:'#9fb0c7'},grid:{color:'rgba(255,255,255,0.03)'}}}}});
+const macdChart=new Chart(macdCtx,{type:'bar',data:{datasets:[
+  {label:'MACD hist',data:[],backgroundColor:[],borderWidth:0},
+  {label:'MACD',data:[],type:'line',borderColor:'#6b5bff',borderWidth:1.6,pointRadius:0,tension:0},
+  {label:'Signal',data:[],type:'line',borderColor:'#00d07f',borderWidth:1.2,pointRadius:0,tension:0}
+]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{type:'time',display:false},y:{grid:{color:'rgba(255,255,255,0.03)'},ticks:{color:'#9fb0c7'}}}}});
+
+function resizeAll(){mainChart.resize();rsiChart.resize();macdChart.resize();}
+window.addEventListener('resize',resizeAll);
+
+/* ---------- Finnhub integration ---------- */
+let fhSocket = null;
+let livePrices = []; // {x: ISO time, y: price}
+let symbolSubscribed = null;
+let lastCandleTime = 0;
+
+/**
+ * Fetch historical candles from Finnhub (used to seed charts).
+ * resolution: '1','5','15','60','D'
+ * outputsize is number of bars (we calculate from timestamp).
+ */
+async function fetchFinnhubCandles(symbol, resolution='5', outputsize=500){
+  const key = CONFIG.API_KEY;
+  if(!key || key === 'PASTE_YOUR_FINNHUB_KEY_HERE'){
+    alert('Please set CONFIG.API_KEY to your Finnhub API key in the script.');
+    throw new Error('Missing Finnhub API key');
+  }
+
+  // compute from / to in seconds (unix)
+  const to = Math.floor(Date.now()/1000);
+  const multiplier = resolution === 'D' ? 60*60*24 : parseInt(resolution,10) * 60;
+  const from = Math.max(0, to - (multiplier * Math.max(outputsize,100)));
+  const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${to}&token=${key}`;
+  const res = await fetch(url);
+  const j = await res.json();
+
+  if(j.s !== 'ok') {
+    // Finnhub returns "no_data" or other states; propagate a friendly error
+    throw new Error(j.error || j.s || 'No candlestick data available');
+  }
+
+  // j.t (timestamps), j.o, j.h, j.l, j.c, j.v
+  const candles = j.t.map((ts, i) => {
+    const dt = new Date(ts * 1000).toISOString();
+    return {
+      time: dt,
+      open: N(j.o[i]),
+      high: N(j.h[i]),
+      low: N(j.l[i]),
+      close: N(j.c[i]),
+      volume: N(j.v[i])
+    };
+  });
+
+  return candles;
+}
+
+async function fetchFinnhubQuote(symbol){
+  const key = CONFIG.API_KEY;
+  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${key}`;
+  const res = await fetch(url);
+  const j = await res.json();
+  // j.pc -> previous close, j.o, j.h, j.l, j.c current price, j.t time
+  return j;
+}
+
+/* Connect to Finnhub WS and subscribe to trades */
+function connectFinnhubWS(symbol){
+  // close previous
+  if(fhSocket){
+    try { fhSocket.close(); } catch(e){/*ignore*/ }
+    fhSocket = null;
+  }
+  livePrices = [];
+  lastCandleTime = 0;
+  symbolSubscribed = symbol;
+
+  const token = CONFIG.API_KEY;
+  fhSocket = new WebSocket(`wss://ws.finnhub.io?token=${token}`);
+
+  fhSocket.addEventListener('open', () => {
+    // subscribe to trade updates
+    fhSocket.send(JSON.stringify({type:'subscribe', symbol}));
+  });
+
+  fhSocket.addEventListener('message', (evt) => {
+    try {
+      const payload = JSON.parse(evt.data);
+      // Finnhub sends {type: 'trade', data: [{p, s, t, v}, ...]} for trades
+      if(payload.type === 'trade' && Array.isArray(payload.data) && payload.data.length){
+        // process all trade points (we'll append)
+        payload.data.forEach(tr => {
+          const price = N(tr.p);
+          const time = new Date(tr.t).toISOString();
+          // Avoid duplicates from multiple sends: ensure time > last
+          if(livePrices.length && livePrices[livePrices.length-1].x === time){
+            // update last value to latest trade price
+            livePrices[livePrices.length-1].y = price;
+          } else {
+            livePrices.push({x: time, y: price});
+          }
+        });
+
+        // cap length
+        if(livePrices.length > 1000) livePrices.splice(0, livePrices.length - 1000);
+
+        // Update main chart dataset (price series)
+        mainChart.data.datasets[0].data = [...mainChart.data.datasets[0].data, ...livePrices.slice(-payload.data.length)];
+        // Also update EMA series with newly computed values later (we recalc below)
+        // keep VWAP and EMA as previously calculated from candles; for live we compute indicators off updated closes.
+        mainChart.update('none');
+
+        // update indicators (use the combined historical closes + current live prices)
+        performRealtimeIndicatorUpdate();
+      }
+    } catch(err){
+      console.warn('WS parse error', err);
+    }
+  });
+
+  fhSocket.addEventListener('close', () => {
+    // no-op or attempt reconnect after delay
+    console.log('Finnhub WS closed, will attempt reconnect in 3s');
+    setTimeout(()=>{ if(symbolSubscribed) connectFinnhubWS(symbolSubscribed); }, 3000);
+  });
+
+  fhSocket.addEventListener('error', (err) => {
+    console.warn('Finnhub WS error', err);
+  });
+}
+
+/* Utility: convert candle array to chart points */
+function toPointsFromCandles(candles, arrVals){
+  return candles.map((c,i)=>({ x: c.time.replace(' ','T'), y: arrVals ? arrVals[i] : c.close }));
+}
+
+/* When user updates symbol: fetch historical, set charts, then connect WS */
+async function updateAll(){
+  try{
+    const symbol = symbolInput.value.trim().toUpperCase();
+    const resolution = intervalSelect.value; // '1','5','15','60','D'
+    const output = parseInt(rangeSelect.value,10) || 200;
+    if(!symbol) return alert('Please enter a ticker symbol (e.g. AAPL)');
+
+    fetchBtn.disabled = true;
+    const savedText = fetchBtn.innerText;
+    fetchBtn.innerHTML = '<span class="spinner"></span>';
+
+    // 1) fetch historical candles to seed charts
+    let candles;
+    try {
+      candles = await fetchFinnhubCandles(symbol, resolution, output+50);
+    } catch(e) {
+      fetchBtn.disabled = false;
+      fetchBtn.innerText = savedText;
+      throw e;
+    }
+
+    // compute indicators from closes
+    const closes = candles.map(c=>c.close);
+    const vwap = calculateVWAP(candles);
+    const ema = calculateEMA(closes, CONFIG.EMA_PERIOD);
+    const rsi = calculateRSI(closes, CONFIG.RSI_PERIOD);
+    const macdObj = calculateMACD(closes, CONFIG.MACD_FAST, CONFIG.MACD_SLOW, CONFIG.MACD_SIGNAL);
+
+    // prepare chart data (last `output` bars)
+    const trim = (arr) => arr.slice(-output);
+    const pricePoints = toPointsFromCandles(candles, closes).slice(-output);
+    const vwapPoints = toPointsFromCandles(candles, vwap).slice(-output);
+    const emaPoints = toPointsFromCandles(candles, ema.map(v=>v===null?null:v)).filter(p=>p.y!=null).slice(-output);
+
+    mainChart.data.datasets[0].data = pricePoints;
+    mainChart.data.datasets[1].data = vwapPoints;
+    mainChart.data.datasets[2].data = emaPoints;
+    mainChart.update('none');
+
+    rsiChart.data.datasets[0].data = toPointsFromCandles(candles, rsi).filter(p=>p.y!=null).slice(-output);
+    rsiChart.update('none');
+
+    const macdPoints = toPointsFromCandles(candles, macdObj.histogram).map(p=>({x:p.x, y:p.y===null?0:p.y})).slice(-output);
+    const macdColors = macdPoints.map(pt => (pt.y>0 ? 'rgba(38,208,123,0.18)' : 'rgba(255,107,107,0.12)'));
+    macdChart.data.datasets[0].data = macdPoints;
+    macdChart.data.datasets[0].backgroundColor = macdColors;
+    macdChart.data.datasets[1].data = toPointsFromCandles(candles, macdObj.macd).filter(p=>p.y!=null).slice(-output);
+    macdChart.data.datasets[2].data = toPointsFromCandles(candles, macdObj.signalLine).filter(p=>p.y!=null).slice(-output);
+    macdChart.update('none');
+
+    // last values (from historical)
+    const lastPrice = closes.at(-1);
+    const lastVwap = vwap.at(-1);
+    const lastEma = ema.at(-1);
+    const lastRsi = rsi.at(-1);
+    const lastMacdHist = macdObj.histogram.at(-1);
+
+    // update signal + metrics
+    const states = indicatorState({ price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist });
+    const score = states.vwap + states.ema + states.rsi + states.macd;
+    const signal = scoreToSignal(score);
+
+    lastSignals.push(signal.tag);
+    if(lastSignals.length > CONFIG.DEBOUNCE_BARS) lastSignals.shift();
+    const stable = lastSignals.every(s=>s === lastSignals[0]);
+    const finalSignal = stable ? signal : { tag:'HOLD', cls:'hold', desc:'Waiting for confirmation' };
+    const confidence = Math.round((Math.abs(score)/4) * 100);
+
+    updateSignalCard(finalSignal, confidence, score);
+    populateMetrics(states, { price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist }, { prevClose: NaN, preMarket: NaN });
+
+    // pre-signal
+    const preSignal = calculatePreSignal({ price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist });
+    let preScore = (preSignal.tag === 'PRE-BUY' || preSignal.tag === 'PRE-SELL') ? 100 : 0;
+    updatePreSignalCard(preSignal, preScore);
+
+    // 2) fetch a quote for prev close (optional)
+    try {
+      const q = await fetchFinnhubQuote(symbol);
+      const prevClose = q.pc ? N(q.pc) : NaN;
+      // update metric Prev Close
+      populateMetrics(states, { price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist }, { prevClose, preMarket: NaN });
+    } catch(e){
+      // ignore
+    }
+
+    // 3) connect to websocket for live ticks
+    connectFinnhubWS(symbol);
+
+    fetchBtn.disabled = false;
+    fetchBtn.innerText = 'Update';
+  }catch(err){
+    fetchBtn.disabled = false;
+    fetchBtn.innerText = 'Update';
+    console.error(err);
+    alert('Error: ' + (err.message || err));
+  }
+}
+
+/* Recompute indicators from the current mainChart price dataset + live prices */
+function performRealtimeIndicatorUpdate(){
+  // Get base closes from main dataset 0
+  const dataset = mainChart.data.datasets[0].data || [];
+  const closes = dataset.map(pt => N(pt.y));
+  if(closes.length < 10) {
+    // Not enough data yet
+    return;
+  }
+
+  // Calculate indicators
+  const ema = calculateEMA(closes, CONFIG.EMA_PERIOD);
+  const rsi = calculateRSI(closes, CONFIG.RSI_PERIOD);
+  const macdObj = calculateMACD(closes, CONFIG.MACD_FAST, CONFIG.MACD_SLOW, CONFIG.MACD_SIGNAL);
+
+  // update EMA line dataset (dataset index 2) — map indexes to points with x values present in dataset
+  const emaPoints = [];
+  for(let i=0;i<closes.length;i++){
+    if(ema[i] != null){
+      emaPoints.push({ x: mainChart.data.datasets[0].data[i].x, y: ema[i] });
+    }
+  }
+  mainChart.data.datasets[2].data = emaPoints.slice(-Math.max(200, emaPoints.length));
+  mainChart.update('none');
+
+  // RSI update
+  rsiChart.data.datasets[0].data = mainChart.data.datasets[0].data.map((pt,i)=>({x:pt.x,y:rsi[i]})).filter(p=>p.y!=null).slice(-200);
+  rsiChart.update('none');
+
+  // MACD update
+  const macdHistPoints = mainChart.data.datasets[0].data.map((pt,i)=>({x:pt.x,y:macdObj.histogram[i]==null?0:macdObj.histogram[i]})).slice(-200);
+  const macdColors = macdHistPoints.map(p=>p.y>0?'rgba(38,208,123,0.18)':'rgba(255,107,107,0.12)');
+  macdChart.data.datasets[0].data = macdHistPoints;
+  macdChart.data.datasets[0].backgroundColor = macdColors;
+  macdChart.data.datasets[1].data = mainChart.data.datasets[0].data.map((pt,i)=>({x:pt.x,y:macdObj.macd[i]})).filter(p=>p.y!=null).slice(-200);
+  macdChart.data.datasets[2].data = mainChart.data.datasets[0].data.map((pt,i)=>({x:pt.x,y:macdObj.signalLine[i]})).filter(p=>p.y!=null).slice(-200);
+  macdChart.update('none');
+
+  // compute last values & signal
+  const lastPrice = closes.at(-1);
+  const lastVwap = (mainChart.data.datasets[1].data || []).at(-1)?.y || NaN;
+  const lastEma = ema.at(-1);
+  const lastRsi = rsi.at(-1);
+  const lastMacdHist = macdObj.histogram.at(-1);
+
+  const states = indicatorState({ price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist });
+  const score = states.vwap + states.ema + states.rsi + states.macd;
+  const signal = scoreToSignal(score);
+
+  lastSignals.push(signal.tag);
+  if(lastSignals.length > CONFIG.DEBOUNCE_BARS) lastSignals.shift();
+  const stable = lastSignals.every(s=>s === lastSignals[0]);
+  const finalSignal = stable ? signal : { tag:'HOLD', cls:'hold', desc:'Waiting for confirmation' };
+  const confidence = Math.round((Math.abs(score)/4) * 100);
+
+  updateSignalCard(finalSignal, confidence, score);
+  populateMetrics(states, { price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist }, { prevClose: NaN, preMarket: NaN });
+
+  // pre-signal
+  const preSignal = calculatePreSignal({ price:lastPrice, vwap:lastVwap, ema:lastEma, rsi:lastRsi, macdHist:lastMacdHist });
+  const preScore = (preSignal.tag === 'PRE-BUY' || preSignal.tag === 'PRE-SELL') ? 100 : 0;
+  updatePreSignalCard(preSignal, preScore);
+}
+
+/* UI helpers */
+function updateSignalCard(signal, confidence, score){
+  signalText.innerText = signal.tag;
+  signalSub.innerText = `${signal.desc} — score ${score}`;
+  confidenceEl.innerText = `${confidence}%`;
+  signalCard.className = 'card signalBadge ' + signal.cls;
+}
+
+function populateMetrics(states, vals, extra={prevClose:NaN, preMarket:NaN}) {
+  metricList.innerHTML = '';
+  const list = [
+    {k:'Price', v:vals.price},
+    {k:'VWAP', v:vals.vwap},
+    {k:`EMA(${CONFIG.EMA_PERIOD})`, v:vals.ema},
+    {k:`RSI(${CONFIG.RSI_PERIOD})`, v:vals.rsi},
+    {k:'MACD hist', v:vals.macdHist},
+    {k:'Prev Close', v:extra.prevClose},
+    {k:'Pre-Market', v:extra.preMarket}
+  ];
+  list.forEach(it=>{
+    const el = document.createElement('div'); el.className='metric';
+    el.innerHTML = `<div style='font-size:12px;color:var(--muted)'>${it.k}</div><div style='font-weight:700'>${(it.v==null || isNaN(it.v))?'-':(typeof it.v==='number'?it.v.toFixed(2):it.v)}</div>`;
+    metricList.appendChild(el);
+  });
+  rsiVal.innerText = vals.rsi==null?'-':vals.rsi.toFixed(2);
+  macdVal.innerText = vals.macdHist==null?'-':vals.macdHist.toFixed(5);
+}
+
+/* Wire up button */
+fetchBtn.addEventListener('click', ()=>{ lastSignals=[]; updateAll(); });
+
+/* Optional: auto-refresh historical every 5 minutes to keep candles accurate (websocket supplies ticks) */
+setInterval(()=>{ if(symbolInput.value.trim()) updateAll().catch(()=>{}); }, 5 * 60 * 1000);
+
+</script>
+
+</body>
+</html>
