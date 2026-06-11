@@ -275,7 +275,7 @@ async function fetchOHLC(symbol, interval, outputsize = 200) {
   const res = await fetch(url);
   const j = await res.json();
 
-  if (j.status === 'error') throw new Error(j.message || 'API error');
+  /*if (j.status === 'error') throw new Error(j.message || 'API error');*/
 
   const rows = (j.values || []).slice().reverse();
   const candles = rows.map(r => ({
@@ -326,7 +326,7 @@ async function updateAll() {
     const { candles, meta, prepost } = await fetchOHLC(symbol, interval, output + 100);
     fetchBtn.disabled = false;
     fetchBtn.innerText = 'Update';
-    if (!candles.length) throw new Error('No data returned');
+    /* if (!candles.length) throw new Error('No data returned'); */
 
     const closes = candles.map(c => c.close);
     const vwap = calculateVWAP(candles);
